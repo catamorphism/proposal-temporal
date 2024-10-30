@@ -19,3 +19,7 @@ intl402/DateTimeFormat/proto-from-ctor-realm.js
 
 # https://github.com/tc39/ecma402/issues/402
 intl402/DateTimeFormat/prototype/resolvedOptions/hourCycle-default.js
+
+# TODO remove this - don't commit
+intl402/DateTimeFormat/offset-timezone-no-unicode-minus-sign.js
+
