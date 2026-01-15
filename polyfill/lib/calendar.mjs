@@ -846,7 +846,7 @@ const nonIsoHelperBase = {
     }
     return { ...calendarDate, month, day };
   },
-  calendarToIsoDate(date, overflow = 'constrain', cache) {
+  calendarToIsoDate(date, temporalType = 'date', overflow = 'constrain', cache) {
     const originalDate = date;
     // First, normalize the calendar date to ensure that (year, month, day)
     // are all present, converting monthCode and eraYear if needed.
@@ -875,6 +875,21 @@ const nonIsoHelperBase = {
       if (cached) return cached;
     }
 
+    // If we're being called from CalendarYearMonthFromFields, we
+    // don't want to throw if the ISO date is after the maximum day
+    // but within the maximum month, so we adjust all ISO dates to
+    // have day: 1.
+    function adjustIfYearMonth(isoDate) {
+      if (temporalType !== 'year-month')
+        return;
+      const result = { ...isoDate, day: 1 };
+      return [result, isoDate.day - 1];
+    }
+
+    function addDays(days, isoDate) {
+      return { ...isoDate, day: isoDate.day + days };
+    }
+
     // First, try to roughly guess the result
     let isoEstimate = clampISODate(this.estimateIsoDate({ year, month, day }));
     const calculateSameMonthResult = (diffDays) => {
@@ -891,43 +906,51 @@ const nonIsoHelperBase = {
       if (date.day > this.minimumMonthLength(date)) {
         // There's a chance that the calendar date is out of range. Throw or
         // constrain if so.
-        let testCalendarDate = this.isoToCalendarDate(testIsoEstimate, cache);
+        let [adjustedDate, subtractedDays] = adjustIfYearMonth(testIsoEstimate);
+        let testCalendarDate = this.isoToCalendarDate(adjustedDate, cache);
         while (testCalendarDate.month !== month || testCalendarDate.year !== year) {
           if (overflow === 'reject') {
             throw new RangeErrorCtor(`day ${day} does not exist in month ${month} of year ${year}`);
           }
           // Back up a day at a time until we're not hanging over the month end
           testIsoEstimate = ES.AddDaysToISODate(testIsoEstimate, -1);
-          testCalendarDate = this.isoToCalendarDate(testIsoEstimate, cache);
+          [adjustedDate, subtractedDays] = adjustIfYearMonth(testIsoEstimate);
+          testCalendarDate = this.isoToCalendarDate(adjustedDate, cache);
         }
       }
       return testIsoEstimate;
     };
     let sign = 0;
-    let roundtripEstimate = this.isoToCalendarDate(isoEstimate, cache);
-    let diff = simpleDateDiff(date, roundtripEstimate);
+    let [adjustedIsoEstimate, subtractedDaysIsoEstimate] = adjustIfYearMonth(isoEstimate);
+    let roundtripEstimate = this.isoToCalendarDate(adjustedIsoEstimate, cache);
+    let diff = simpleDateDiff(date, addDays(subtractedDaysIsoEstimate, roundtripEstimate));
     if (diff.years !== 0 || diff.months !== 0 || diff.days !== 0) {
       const diffTotalDaysEstimate = diff.years * 365 + diff.months * 30 + diff.days;
       isoEstimate = clampISODate(ES.AddDaysToISODate(isoEstimate, diffTotalDaysEstimate));
-      roundtripEstimate = this.isoToCalendarDate(isoEstimate, cache);
-      diff = simpleDateDiff(date, roundtripEstimate);
+      [adjustedIsoEstimate, subtractedDaysIsoEstimate] = adjustIfYearMonth(isoEstimate);
+      roundtripEstimate = this.isoToCalendarDate(adjustedIsoEstimate, cache);
+      diff = simpleDateDiff(date, addDays(subtractedDaysIsoEstimate, roundtripEstimate));
       if (diff.years === 0 && diff.months === 0) {
         isoEstimate = calculateSameMonthResult(diff.days);
       } else {
-        sign = this.compareCalendarDates(date, roundtripEstimate);
+        sign = this.compareCalendarDates(date, addDays(subtractedDaysIsoEstimate, roundtripEstimate));
       }
     }
     // If the initial guess is not in the same month, then bisect the
     // distance to the target, starting with 8 days per step.
     let increment = 8;
+    let subtractedDays = subtractedDaysIsoEstimate;
+    let adjustedDate = adjustedIsoEstimate;
     while (sign) {
       isoEstimate = ES.AddDaysToISODate(isoEstimate, sign * increment);
       const oldRoundtripEstimate = roundtripEstimate;
-      roundtripEstimate = this.isoToCalendarDate(isoEstimate, cache);
+      const oldSubtractedDays = subtractedDays;
+      [adjustedDate, subtractedDays] = adjustIfYearMonth(isoEstimate);
+      roundtripEstimate = this.isoToCalendarDate(adjustedDate, cache);
       const oldSign = sign;
-      sign = this.compareCalendarDates(date, roundtripEstimate);
+      sign = this.compareCalendarDates(date, addDays(subtractedDays, roundtripEstimate));
       if (sign) {
-        diff = simpleDateDiff(date, roundtripEstimate);
+        diff = simpleDateDiff(date, addDays(subtractedDays, roundtripEstimate));
         if (diff.years === 0 && diff.months === 0) {
           isoEstimate = calculateSameMonthResult(diff.days);
           // Signal the loop condition that there's a match.
@@ -946,7 +969,7 @@ const nonIsoHelperBase = {
               throw new RangeErrorCtor(`Can't find ISO date from calendar date: ${JSONStringify({ ...originalDate })}`);
             } else {
               // To constrain, pick the earliest value
-              const order = this.compareCalendarDates(roundtripEstimate, oldRoundtripEstimate);
+              const order = this.compareCalendarDates(addDays(subtractedDays, roundtripEstimate), addDays(oldSubtractedDays, oldRoundtripEstimate));
               // If current value is larger, then back up to the previous value.
               if (order > 0) isoEstimate = ES.AddDaysToISODate(isoEstimate, -1);
               sign = 0;
@@ -2132,9 +2155,9 @@ const nonIsoGeneralImpl = {
     // Note: Lunisolar calendars go on to resolve month/monthCode in their
     // adjustCalendarDate implementations
   },
-  dateToISO(fields, overflow) {
+  dateToISO(fields, temporalType, overflow) {
     const cache = new OneObjectCache(this.id);
-    const result = this.helper.calendarToIsoDate(fields, overflow, cache);
+    const result = this.helper.calendarToIsoDate(fields, temporalType, overflow, cache);
     cache.setObject(result);
     return result;
   },
