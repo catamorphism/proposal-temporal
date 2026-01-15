@@ -1782,7 +1782,7 @@ export function CalendarYearMonthFromFields(calendar, fields, overflow) {
   const calendarImpl = calendarImplForID(calendar);
   calendarImpl.resolveFields(fields, 'year-month');
   fields.day = 1;
-  const result = calendarImpl.dateToISO(fields, overflow);
+  const result = calendarImpl.dateToISO(fields, 'year-month', overflow);
   RejectYearMonthRange(result);
   return result;
 }
